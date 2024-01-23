@@ -1,0 +1,61 @@
+type = "directrequest"
+schemaVersion = 1
+name = "Multi_Gas_Fetcher_id_2"
+externalJobID = "a085ce11-aeb7-4996-b8a9-45ece2ffa502"
+forwardingAllowed = false
+maxTaskDuration = "0s"
+contractAddress = "0x9EFC601923b1092CBED679FC31f609583d893322"
+minContractPaymentLinkJuels = "0"
+observationSource = """
+    decode_log   [type=ethabidecodelog
+                  abi="OracleRequest(bytes32 indexed specId, address requester, bytes32 requestId, uint256 payment, address callbackAddr, bytes4 callbackFunctionId, uint256 cancelExpiration, uint256 dataVersion, bytes data)"
+                  data="$(jobRun.logData)"
+                  topics="$(jobRun.logTopics)"]
+
+    decode_cbor  [type=cborparse data="$(decode_log.data)"]
+
+
+    fetch_gas_values[type=bridge name="test_adapter" requestData="{\\"type\\": $(decode_cbor.type), \\"parameters\\": $(decode_cbor.parameters), \\"gasName\\": $(decode_cbor.gasName), \\"id\\": $(decode_log.requestId)}"]
+      decode_log -> decode_cbor -> fetch_gas_values
+    co2        [type=jsonparse path="data,CO2"]
+     fetch_gas_values -> co2 -> encode_mwr
+
+    co          [type=jsonparse path="data,CO"]
+         fetch_gas_values -> co -> encode_mwr
+    ch4          [type=jsonparse path="data,CH4"]
+         fetch_gas_values -> ch4 -> encode_mwr
+    n2o          [type=jsonparse path="data,N2O"]
+         fetch_gas_values -> n2o  -> encode_mwr
+    status       [type=jsonparse path="status"]
+     fetch_gas_values -> status  -> encode_mwr
+   multipliedBy [type=jsonparse path="data,multipliedBy"]
+     fetch_gas_values -> multipliedBy  -> encode_mwr
+
+    encode_mwr   [type=ethabiencode
+                  abi="(bytes32 requestId, bytes requestHash, string requestStatus, string stationName, string methodName, int256 multipliedBy, int256 co2, int256 co, int256 ch4, int256 n2o)"
+                  data=<{
+                      "requestId": $(decode_log.requestId),
+                      "requestHash": $(decode_cbor.requestHash),
+                      "requestStatus": $(status),
+                      "stationName": $(decode_cbor.stationName),
+                      "methodName": $(decode_cbor.type),
+                      "multipliedBy": $(multipliedBy),
+                      "co2": $(co2),
+                      "co": $(co),
+                      "ch4": $(ch4),
+                      "n2o": $(n2o)
+                  }>]
+
+    encode_tx  [type=ethabiencode
+                abi="fulfillOracleRequest2(bytes32 requestId, uint256 payment, address callbackAddress, bytes4 callbackFunctionId, uint256 expiration, bytes calldata data)"
+                data=<{"requestId": $(decode_log.requestId),
+                       "payment":   $(decode_log.payment),
+                       "callbackAddress": $(decode_log.callbackAddr),
+                       "callbackFunctionId": $(decode_log.callbackFunctionId),
+                       "expiration": $(decode_log.cancelExpiration),
+                       "data": $(encode_mwr)}>]
+
+    submit_tx    [type=ethtx to="0x9EFC601923b1092CBED679FC31f609583d893322" data="$(encode_tx)"]
+
+ encode_mwr -> encode_tx -> submit_tx
+"""
